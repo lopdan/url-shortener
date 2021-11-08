@@ -3,16 +3,47 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"log"
 	"strconv"
+	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/middleware"
+	"net/http"
+	"syscall"
 
+	h "github.com/lopdan/url-shortener/src/api"
 	mongo "github.com/lopdan/url-shortener/src/repository/mongodb"
 	redis "github.com/lopdan/url-shortener/src/repository/redis"
 	"github.com/lopdan/url-shortener/src/shortener"
 )
 
 func main() {
+	// Set up the service
+	repo := ChooseRepo()
+	service := shortener.NewRedirectService(repo)
+	handler := h.NewHandler(service)
+	// Check services and requests
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Get("/{code}", handler.Get)
+	r.Post("/", handler.Post)
+	// Start the server
+	errs := make(chan error, 2)
+	go func() {
+		fmt.Println("Listening on port :8000")
+		errs <- http.ListenAndServe(HttpPort(), r)
 
+	}()
+	// Check exit command
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGINT)
+		errs <- fmt.Errorf("%s", <-c)
+	}()
+	fmt.Printf("Terminated %s", <-errs)
 }
 
 /** Port in 8000*/
